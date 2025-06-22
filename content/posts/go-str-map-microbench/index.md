@@ -7,15 +7,13 @@ images:
 tags: ["Go", "Benchmarking", "Performance", "Microoptimization"]
 ---
 
-While working through the [Go track on Exercism.org](https://exercism.org/tracks/go), I encountered an interesting performance puzzle during the **Nucleotide Count** exercise. This seemingly straightforward task led me down a rabbit hole of microbenchmarking, ultimately uncovering an insight that goes far beyond string iteration.
+I was working through the [Go track on Exercism.org](https://exercism.org/tracks/go), and encountered an interesting performance puzzle on the **Nucleotide Count** exercise. The exercise seemed straightforward enough, but led me down a rabbit hole of microbenchmarking, ultimately uncovering an insight that goes far beyond string iteration.
 
 ## The Initial Question: Bytes or Runes?
 
-Since the input for this exercise is a DNA sequence (a string of ASCII characters like `A`, `C`, `G`, and `T`), I implemented the counting logic using a `map` to track the frequency of each nucleotide.
+Since the input for this exercise is a DNA sequence (a string of ASCII characters like `A`, `C`, `G`, and `T`), my first thought was to implement the counting logic using a `map` to track the frequency of each nucleotide.
 
-Almost reflexively, I began to wonder: *Should I iterate over the string using bytes (`for i := 0; i < len(s); i++`) or runes (`for _, r := range s`) for optimal performance?*
-
-I recalled a [comment on r/golang](https://www.reddit.com/r/golang/) that emphasized how idiomatic and efficient it is to iterate by **bytes** when dealing with ASCII-only strings. So that's what I did. The solution passed the tests, and I submitted it.
+With that out of the way, I reflexively started coding the `for` loop to iterate over the string using bytes (`for i := 0; i < len(s); i++`) as I recalled a [comment on r/golang](https://www.reddit.com/r/golang/) that emphasized how idiomatic and efficient it is to iterate by **bytes** when dealing with ASCII-only strings.
 
 ```go
 package dna
@@ -48,9 +46,11 @@ func (d DNA) Counts() (Histogram, error) {
 
 ## A Surprising Benchmark Result
 
-However, when I reviewed the “Dig Deeper” section of the exercise, I noticed that the solution by `bobahop` [iterated over runes](https://exercism.org/tracks/go/exercises/nucleotide-count/approaches/switch-statement), and outperformed mine in microbenchmarks.
+I very much enjoy the “Dig Deeper” section of each exercise, and for this one, I noticed that the solution by `bobahop` actually [iterated over runes](https://exercism.org/tracks/go/exercises/nucleotide-count/approaches/switch-statement) (`for _, r := range s`) and even outperformed mine in microbenchmarks.
 
-This was unexpected. I had assumed that rune iteration, which involves decoding UTF-8 characters, would incur more overhead than raw byte iteration. I knew my solution was also slower due to checking the existence of a key instead of using a `switch` statement, but I also tried `bobahop`’s solution with byte iteration—and found it performed worse than his original version.
+This was unexpected. Had I been lied to by stranger on Reddit?
+
+I had assumed that rune iteration, which involves decoding UTF-8 characters, would incur more overhead than raw byte iteration. I knew my solution was also slower due to checking the existence of a key instead of using a `switch` statement, but I also tried `bobahop`’s solution with byte iteration, and found it performed worse than his original version, as he states on the exercism page.
 
 ```go
 package dna
@@ -134,7 +134,7 @@ BenchmarkTranscribeDnaToRnaBytes-24      1000000               331.4 ns/op      
 BenchmarkTranscribeDnaToRnaRunes-24      1000000               529.3 ns/op             0 B/op          0 allocs/op
 ```
 
-Next, I simplified the functions to focus solely on counting nucleotides.
+Next, I simplified the functions for counting nucleotides, in case there were other things the compiler was not liking about the original solution. I also modernized the for loop (`for i := range len(s)`) of the byte iteration.
 
 ```go
 func CountNucleotidesByByteIndex(dna string) map[byte]int {
@@ -154,7 +154,7 @@ func CountNucleotidesByRuneRange(dna string) map[rune]int {
 }
 ```
 
-The performance differences remained significant.
+However, the performance differences remained significant.
 
 ```sh
 $ go test -bench='^(BenchmarkCountNucleotidesByByteIndex|BenchmarkCountNucleotidesByRuneRange)$' -benchtime=1000000x -benchmem
@@ -172,20 +172,20 @@ At this point, I realized I needed more insight into what was happening under th
 
 ## CPU Profiling Tells the Real Story
 
-To resolve the discrepancy, I performed CPU profiling—and things began to make sense.
+I profiled both functions for CPU and things began to make sense.
 
 ![Graph of CPU Profile](Profile-ByByteIndex-VS-ByRuneRange.png "Graph of CPU Profile")
 
 As shown, `CountNucleotidesByByteIndex` calls the generic `mapassign` function, which is significantly slower than the specialized `mapassign_fast32` function called by `CountNucleotidesByRuneRange`.
 
-I had been focused on **string iteration**, but the **map operations** were the real performance bottleneck. Specifically, the **type of map key** used has a surprisingly large impact.
+This led me to realize that I had been focused on **string iteration**, but the **map operations** were the real performance bottleneck. Specifically, the **type of map key** used has a surprisingly large impact.
 
 ### Internal Map Implementations in Go
 
 Go’s runtime uses different internal functions for map assignment based on the key type:
 
-* For generic key types like `byte`, Go uses the slower `mapassign`.
-* For certain primitive types (e.g., `int32`, used by `rune`), it uses optimized variants like `mapassign_fast32`.
+* For smaller key types like `byte`, Go uses the slower, more generic, `mapassign` function.
+* For the `int32` type (of which `rune` is an alias of), it uses optimized variants like `mapassign_fast32`.
 
 This optimization for `int32` made the rune-based implementation significantly faster, despite the overhead of rune decoding.
 
@@ -225,7 +225,7 @@ PASS
 ok      github.com/pessolato/strmapmicrobench   13.631s
 ```
 
-As expected, `int16` received no runtime optimization. Despite the casting overhead, `CountNucleotidesByByteIndexAsRune` outperformed `CountNucleotidesByRuneRange`, thanks to the faster byte iteration.
+Interestingly, `int16` received no runtime optimization. Additionally, despite the casting overhead, `CountNucleotidesByByteIndexAsRune` outperformed `CountNucleotidesByRuneRange`, thanks to the faster byte iteration.
 
 ## Final Optimization: Arrays and Switches
 
