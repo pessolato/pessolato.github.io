@@ -3,6 +3,10 @@ languageCode = "en-us"
 title = "pessolato.dev"
 theme = "hello-friend-ng"
 
+[caches]
+  [caches.images]
+    dir = ':cacheDir/images'
+
 [params]
   dateform        = "2006-01-02"
   dateformShort   = "01-02"
