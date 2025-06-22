@@ -1,7 +1,7 @@
 ---
 title: "Microbenchmarking Go: Bytes vs Runes and the Hidden Cost of Map Keys"
 date: 2025-06-22T15:03:36+02:00
-draft: true
+draft: false
 toc: false
 images:
 tags: ["Go", "Benchmarking", "Performance", "Microoptimization"]
@@ -48,7 +48,7 @@ func (d DNA) Counts() (Histogram, error) {
 
 I very much enjoy the “Dig Deeper” section of each exercise, and for this one, I noticed that the solution by `bobahop` actually [iterated over runes](https://exercism.org/tracks/go/exercises/nucleotide-count/approaches/switch-statement) (`for _, r := range s`) and even outperformed mine in microbenchmarks.
 
-This was unexpected. Had I been lied to by stranger on Reddit?
+This was unexpected. Had I been lied to by a stranger on Reddit?
 
 I had assumed that rune iteration, which involves decoding UTF-8 characters, would incur more overhead than raw byte iteration. I knew my solution was also slower due to checking the existence of a key instead of using a `switch` statement, but I also tried `bobahop`’s solution with byte iteration, and found it performed worse than his original version, as he states on the exercism page.
 
@@ -189,7 +189,7 @@ Go’s runtime uses different internal functions for map assignment based on the
 
 This optimization for `int32` made the rune-based implementation significantly faster, despite the overhead of rune decoding.
 
-I then implemented two more functions—one using `map[int16]int` and another that iterated through bytes but cast them to `rune` as keys:
+I then implemented two more functions, still iterating through bytes but casting them to `int16` and `rune` as keys:
 
 ```go
 func CountNucleotidesByByteIndexAsRune(dna string) map[rune]int {
@@ -305,5 +305,4 @@ This experience reinforced a crucial lesson: **Always benchmark and profile your
 * **Profiling is essential** to reveal hidden bottlenecks.
 * For small, fixed-size key domains, **arrays** are often a better alternative to maps.
 
-You can find the complete source code and benchmarks in the GitHub repository:
-👉 [https://github.com/pessolato/strmapmicrobench](https://github.com/pessolato/strmapmicrobench)
+You can find the complete source code and benchmarks in the GitHub repository: [https://github.com/pessolato/strmapmicrobench](https://github.com/pessolato/strmapmicrobench)

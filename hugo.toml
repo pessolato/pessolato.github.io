@@ -19,12 +19,25 @@ theme = "hello-friend-ng"
   enableSharingButtons = true
   
   # Show a global language switcher in the navigation bar
-  enableGlobalLanguageMenu = true
+  enableGlobalLanguageMenu = false
 
   # Metadata mostly used in document"s head
   description = "Backend development, secure systems, and engineering craftsmanship"
   keywords = "backend, software, development, engineering, craftsmanship, security, systems"
   images = [""]
+
+  # Custom CSS
+  customCSS = ["/css/custom.css"]
+
+  [[params.social]]
+    url = "https://www.linkedin.com/in/pessolato"
+    name = "linkedin"
+    rel = "noopener"
+
+  [[params.social]]
+    url = "https://github.com/pessolato"
+    name = "github"
+    rel = "noopener"
 
 [taxonomies]
     category = "blog"
