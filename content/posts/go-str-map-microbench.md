@@ -7,13 +7,13 @@ images:
 tags: ["Go", "Benchmarking", "Performance", "Microoptimization"]
 ---
 
-While working through the [Go track on Exercism.org](https://exercism.org/tracks/go), I encountered an interesting performance puzzle during the **Nucleotide Count** exercise. This seemingly straightforward task led me down a rabbit hole of microbenchmarking, uncovering an insight that went far beyond string iteration: the hidden cost of map key types in Go.
+While working through the [Go track on Exercism.org](https://exercism.org/tracks/go), I encountered an interesting performance puzzle during the **Nucleotide Count** exercise. This seemingly straightforward task led me down a rabbit hole of microbenchmarking, ultimately uncovering an insight that goes far beyond string iteration.
 
 ## The Initial Question: Bytes or Runes?
 
-Since the input for this exercise is a DNA sequence (a string of ASCII characters like `A`, `C`, `G`, `T`), I implemented the counting logic using a `map` to track the frequency of each nucleotide.
+Since the input for this exercise is a DNA sequence (a string of ASCII characters like `A`, `C`, `G`, and `T`), I implemented the counting logic using a `map` to track the frequency of each nucleotide.
 
-Almost reflexively, I began to wonder: _Should I iterate over the string using bytes (`for i := 0; i < len(s); i++`) or runes (`for _, r := range s`) for optimal performance?_  
+Almost reflexively, I began to wonder: *Should I iterate over the string using bytes (`for i := 0; i < len(s); i++`) or runes (`for _, r := range s`) for optimal performance?*
 
 I recalled a [comment on r/golang](https://www.reddit.com/r/golang/) that emphasized how idiomatic and efficient it is to iterate by **bytes** when dealing with ASCII-only strings. So that's what I did. The solution passed the tests, and I submitted it.
 
@@ -48,9 +48,9 @@ func (d DNA) Counts() (Histogram, error) {
 
 ## A Surprising Benchmark Result
 
-However, when I reviewed the “Dig Deeper” section of the exercise, I noticed the solution by `bobahop` that [iterated by runes](https://exercism.org/tracks/go/exercises/nucleotide-count/approaches/switch-statement), which outperformed mine in microbenchmarks.
+However, when I reviewed the “Dig Deeper” section of the exercise, I noticed that the solution by `bobahop` [iterated over runes](https://exercism.org/tracks/go/exercises/nucleotide-count/approaches/switch-statement), and outperformed mine in microbenchmarks.
 
-This was unexpected. Intuitively, I had assumed that rune iteration, which involves decoding UTF-8 characters, should incur more overhead than raw byte iteration. I knew my solution was also slower due to checking the existence of a key instead of relying on a `switch` statement, but I also tried `bobahop`'s solution with iteration through bytes and found it performed worse than his original solution.
+This was unexpected. I had assumed that rune iteration, which involves decoding UTF-8 characters, would incur more overhead than raw byte iteration. I knew my solution was also slower due to checking the existence of a key instead of using a `switch` statement, but I also tried `bobahop`’s solution with byte iteration—and found it performed worse than his original version.
 
 ```go
 package dna
@@ -86,9 +86,9 @@ func (dna DNA) Counts() (Histogram, error) {
 
 ## My Initial Approach
 
-I decided to create a dedicated repository to isolate and microbenchmark the different implementations with different iteration strategies.
+I decided to create a dedicated repository to isolate and microbenchmark different implementations with varying iteration strategies.
 
-I started with a simple problem: iterating over a `string` input, in this case transcribing DNA to RNA.
+I started with a simple problem: transcribing DNA to RNA.
 
 ```go
 func TranscribeDnaToRnaBytes(dna string, rna []byte) {
@@ -122,7 +122,7 @@ func TranscribeDnaToRnaRunes(dna string, rna []rune) {
 }
 ```
 
-As anticipated, my benchmarks showed that **byte iteration is slightly faster** than rune iteration, which confused me further.
+As anticipated, my benchmarks showed that **byte iteration is slightly faster** than rune iteration.
 
 ```sh
 $ go test -bench='^(BenchmarkTranscribeDnaToRnaBytes|BenchmarkTranscribeDnaToRnaRunes)$' -benchtime=1000000x -benchmem
@@ -132,11 +132,9 @@ pkg: github.com/pessolato/strmapmicrobench
 cpu: 12th Gen Intel(R) Core(TM) i9-12900F
 BenchmarkTranscribeDnaToRnaBytes-24      1000000               331.4 ns/op             0 B/op          0 allocs/op
 BenchmarkTranscribeDnaToRnaRunes-24      1000000               529.3 ns/op             0 B/op          0 allocs/op
-PASS
-ok      github.com/pessolato/strmapmicrobench   0.864s
 ```
 
-Next, I simplified the functions to count nucleotides.
+Next, I simplified the functions to focus solely on counting nucleotides.
 
 ```go
 func CountNucleotidesByByteIndex(dna string) map[byte]int {
@@ -156,7 +154,7 @@ func CountNucleotidesByRuneRange(dna string) map[rune]int {
 }
 ```
 
-However, I still saw significant differences in performance between the two.
+The performance differences remained significant.
 
 ```sh
 $ go test -bench='^(BenchmarkCountNucleotidesByByteIndex|BenchmarkCountNucleotidesByRuneRange)$' -benchtime=1000000x -benchmem
@@ -170,30 +168,28 @@ PASS
 ok      github.com/pessolato/strmapmicrobench   6.876s
 ```
 
-At this point, I realized I needed more information about what was going on under the hood, so I turned to profiling.
+At this point, I realized I needed more insight into what was happening under the hood. So, I turned to profiling.
 
 ## CPU Profiling Tells the Real Story
 
-To resolve the discrepancy, I turned to CPU profiling. Needless to say, that’s when things started to make sense.
+To resolve the discrepancy, I performed CPU profiling—and things began to make sense.
 
 ![Graph of CPU Profile](Profile-ByByteIndex-VS-ByRuneRange.png "Graph of CPU Profile")
 
-As you can see, the function `CountNucleotidesByByteIndex` calls the underlying `mapassign` function, which is much slower than the `mapassign_fast32` function called by `CountNucleotidesByRuneRange`.
+As shown, `CountNucleotidesByByteIndex` calls the generic `mapassign` function, which is significantly slower than the specialized `mapassign_fast32` function called by `CountNucleotidesByRuneRange`.
 
-This made me realize I had been focused entirely on the **string iteration**, but overlooked the far more significant cost: the **map operations**. In particular, the type used for map keys has a surprising impact on performance.
+I had been focused on **string iteration**, but the **map operations** were the real performance bottleneck. Specifically, the **type of map key** used has a surprisingly large impact.
 
 ### Internal Map Implementations in Go
 
-Go’s runtime uses different internal implementations depending on the key type of a map:
+Go’s runtime uses different internal functions for map assignment based on the key type:
 
-- When the key is a **small value** (like a `byte`), the generic `mapassign` is invoked.
-- When the key is an `int32` (which is the underlying type of a `rune`), a specialized `mapassign_fast32` function is used instead.
+* For generic key types like `byte`, Go uses the slower `mapassign`.
+* For certain primitive types (e.g., `int32`, used by `rune`), it uses optimized variants like `mapassign_fast32`.
 
-The latter is **significantly more optimized**. Thus, although my solution used byte iteration (which is slightly more efficient), it was coupled with a map keyed by `byte`, leading to worse overall performance than the rune-based alternative.
+This optimization for `int32` made the rune-based implementation significantly faster, despite the overhead of rune decoding.
 
-In short, the map key type was the dominating factor in performance, **not** the iteration method.
-
-To experiment with that, I created two other functions: one using a `map[int16]int` to store the counts and another still iterating through bytes but converting the bytes to runes when referencing the map keys.
+I then implemented two more functions—one using `map[int16]int` and another that iterated through bytes but cast them to `rune` as keys:
 
 ```go
 func CountNucleotidesByByteIndexAsRune(dna string) map[rune]int {
@@ -213,7 +209,7 @@ func CountNucleotidesByByteIndexAsInt16(dna string) map[int16]int {
 }
 ```
 
-Here are the microbenchmark results:
+Benchmark results:
 
 ```sh
 $ go test -bench='^BenchmarkCountNucleotidesBy.*$' -benchtime=1000000x -benchmem
@@ -229,15 +225,15 @@ PASS
 ok      github.com/pessolato/strmapmicrobench   13.631s
 ```
 
-The results show Go does not have a specialized function to operate on maps with keys of type `int16`, and while there is the slight overhead of converting a `byte` (`uint8`) into a `rune` (`int32`), `CountNucleotidesByByteIndexAsRune` still performed better than `CountNucleotidesByRuneRange` due to iterating through bytes in a string.
+As expected, `int16` received no runtime optimization. Despite the casting overhead, `CountNucleotidesByByteIndexAsRune` outperformed `CountNucleotidesByRuneRange`, thanks to the faster byte iteration.
 
 ## Final Optimization: Arrays and Switches
 
-Now conscious of the costs of map operations, I decided to try to optimize further. Since the set of nucleotides is small and well-defined, I rewrote the solution using a **fixed-size array** and a `switch` statement to index and update counts. This completely bypassed the map overhead and resulted in a much faster implementation. I kept two different implementations to compare the different iteration methods still.
+Aware now of map-related overhead, I tried a more radical optimization. Since the set of nucleotides is small and fixed, I used a **fixed-size array** combined with a `switch` to track counts—bypassing maps entirely.
 
 ```go
 func CountNucleotidesArrayBytes(dna string) map[byte]int {
-  chars := [4]int{0, 0, 0, 0}
+  chars := [4]int{}
   for i := range len(dna) {
     switch dna[i] {
     case 'A':
@@ -259,7 +255,7 @@ func CountNucleotidesArrayBytes(dna string) map[byte]int {
 }
 
 func CountNucleotidesArrayRunes(dna string) map[rune]int {
-  chars := [4]int{0, 0, 0, 0}
+  chars := [4]int{}
   for i := range dna {
     switch dna[i] {
     case 'A':
@@ -281,7 +277,7 @@ func CountNucleotidesArrayRunes(dna string) map[rune]int {
 }
 ```
 
-This is how they compared to the fastest implementation of counting using a map I had (`CountNucleotidesByByteIndexAsRune`):
+And the benchmark results:
 
 ```sh
 $ go test -bench='^(BenchmarkCountNucleotidesArray.*|BenchmarkCountNucleotidesByByteIndexAsRune)$' -benchtime=1000000x -benchmem
@@ -296,16 +292,18 @@ PASS
 ok      github.com/pessolato/strmapmicrobench   2.739s
 ```
 
+The array-based solutions were substantially faster, confirming that eliminating map operations yields major performance benefits when the key space is small and predictable.
+
 ## Conclusion
 
-This experience reinforced a crucial lesson: It is important to microbenchmark and profile your functions! When performance is a priority, of course. Micro-optimizations like byte vs rune iteration do matter, but their impact can be easily dwarfed by deeper runtime behaviors—like the choice of data structure and key type.
+This experience reinforced a crucial lesson: **Always benchmark and profile your code** when performance matters. Micro-optimizations like byte vs. rune iteration can make a difference, but their impact is often dwarfed by deeper runtime behaviors—such as the data structures you choose and how the Go runtime handles them internally.
 
 ### Key Takeaways
 
-- **Byte iteration is faster than rune iteration**, but only marginally.
-- **Map key types have a significant impact** on performance in Go, due to specialized internal methods.
-- **Profiling is essential** to uncover hidden bottlenecks.
-- For small, fixed-size key domains, **arrays** are often preferable to maps.
+* **Byte iteration is faster than rune iteration**, but only marginally.
+* **Map key types significantly affect performance**, due to Go’s use of specialized internal implementations.
+* **Profiling is essential** to reveal hidden bottlenecks.
+* For small, fixed-size key domains, **arrays** are often a better alternative to maps.
 
-You can find the complete source code and benchmark tests in the GitHub repository:  
+You can find the complete source code and benchmarks in the GitHub repository:
 👉 [https://github.com/pessolato/strmapmicrobench](https://github.com/pessolato/strmapmicrobench)
