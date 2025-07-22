@@ -5,3 +5,7 @@
 .container li {
   text-align: left !important;
 }
+
+.header__inner {
+  width: 68vw !important;
+}
