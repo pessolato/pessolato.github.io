@@ -1,3 +1,7 @@
 .post {
   max-width: 70vw !important;
 }
+
+.container li {
+  text-align: left !important;
+}
